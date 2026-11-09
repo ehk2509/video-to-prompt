@@ -8,7 +8,17 @@ from video2prompt.media import (
     select_shots,
     speech_for_shot,
 )
-from video2prompt.pipeline import add_speech, clean_output, slugify, writer_notes, writer_style
+from video2prompt.pipeline import (
+    add_speech,
+    build_timeline,
+    clean_output,
+    finish_prompt,
+    word_count,
+    slugify,
+    writer_notes,
+    writer_style,
+)
+from video2prompt.backends import BackendError, parse_claude_code_output
 from video2prompt.targets import TARGETS
 
 
@@ -54,6 +64,37 @@ class FrameTimes(unittest.TestCase):
         self.assertEqual(len(frame_times(Shot(1, 0.0, 0.7), 4)), 2)
 
 
+class AdaptiveFrameTimes(unittest.TestCase):
+    shot = Shot(1, 0.0, 10.0)
+
+    def curve(self, busy_from, busy_to):
+        return [(i / 6, 20.0 if busy_from <= i / 6 < busy_to else 1.0) for i in range(1, 60)]
+
+    def test_frames_gather_where_the_picture_changes(self):
+        times = frame_times(self.shot, 8, self.curve(7.0, 8.0))
+        even = frame_times(self.shot, 8)
+        self.assertGreater(sum(7.0 <= t < 8.0 for t in times), sum(7.0 <= t < 8.0 for t in even))
+        self.assertEqual(times, sorted(times))
+
+    def test_quiet_parts_keep_some_frames(self):
+        times = frame_times(self.shot, 8, self.curve(7.0, 8.0))
+        self.assertTrue(any(t < 3.0 for t in times))
+
+    def test_times_stay_inside_shot_and_are_distinct(self):
+        times = frame_times(self.shot, 8, self.curve(4.0, 4.4))
+        self.assertTrue(all(0.0 < t < 10.0 for t in times))
+        self.assertEqual(len(times), len(set(times)))
+
+    def test_flat_or_missing_curve_is_evenly_spread(self):
+        even = frame_times(self.shot, 4)
+        self.assertEqual(even, [1.25, 3.75, 6.25, 8.75])
+        self.assertEqual(frame_times(self.shot, 4, []), even)
+        flat = frame_times(self.shot, 4, [(i / 6, 0.0) for i in range(1, 60)])
+        self.assertEqual(len(flat), 4)
+        self.assertLess(max(flat) - min(flat), 8.0)
+        self.assertGreater(max(flat) - min(flat), 6.0)
+
+
 class Parsing(unittest.TestCase):
     def test_parse_cut_times(self):
         log = "[Parsed_showinfo_2] n:0 pts:90 pts_time:3.75 duration\nx pts_time:12 y"
@@ -70,6 +111,84 @@ class Parsing(unittest.TestCase):
     def test_slugify(self):
         self.assertEqual(slugify("Été à Paris (final)!"), "ete-a-paris-final")
         self.assertEqual(slugify("???"), "video")
+
+
+class FakeBackend:
+    model = "fake"
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = 0
+
+    def generate(self, system, text, images, schema):
+        self.calls += 1
+        return {"prompt": self.replies.pop(0)}
+
+
+class FinishPrompt(unittest.TestCase):
+    def test_timestamps_and_frame_mentions_are_removed(self):
+        text = "A cat sits. At 1.8 seconds, it jumps. By 2.5 s, it lands, its head turning in later frames."
+        self.assertEqual(
+            clean_output(text, TARGETS["ltx"]),
+            "A cat sits. It jumps. It lands, its head turning.",
+        )
+
+    def test_a_display_reading_a_word_is_dropped(self):
+        self.assertEqual(clean_output("A sign reading 'Paris' glows. A cat sits.", TARGETS["ltx"]), "A cat sits.")
+
+    def test_short_prompt_needs_no_model_call(self):
+        backend = FakeBackend([])
+        self.assertEqual(finish_prompt(backend, "A cat sits.", TARGETS["wan"]), "A cat sits.")
+        self.assertEqual(backend.calls, 0)
+
+    def test_long_prompt_is_shortened(self):
+        backend = FakeBackend(["A short cat."])
+        self.assertEqual(finish_prompt(backend, "word " * 130, TARGETS["wan"]), "A short cat.")
+        self.assertEqual(backend.calls, 1)
+
+    def test_shortening_stops_after_three_attempts(self):
+        backend = FakeBackend(["word " * 135, "word " * 130, "word " * 125])
+        self.assertEqual(word_count(finish_prompt(backend, "word " * 140, TARGETS["wan"])), 125)
+        self.assertEqual(backend.calls, 3)
+
+
+class ClaudeCodeOutput(unittest.TestCase):
+    def test_structured_answer_is_returned(self):
+        stream = '{"type":"system"}\nnot json\n{"type":"result","subtype":"success","structured_output":{"prompt":"A cat."}}\n'
+        self.assertEqual(parse_claude_code_output(stream), {"prompt": "A cat."})
+
+    def test_usage_limit_error_is_reported(self):
+        stream = '{"type":"result","subtype":"success","is_error":true,"result":"Usage limit reached"}\n'
+        with self.assertRaisesRegex(BackendError, "Usage limit reached"):
+            parse_claude_code_output(stream)
+
+    def test_missing_result_is_an_error(self):
+        with self.assertRaises(BackendError):
+            parse_claude_code_output('{"type":"system"}\n')
+
+    def test_missing_structured_answer_is_an_error(self):
+        with self.assertRaises(BackendError):
+            parse_claude_code_output('{"type":"result","subtype":"success","result":"plain text"}\n')
+
+
+class Timeline(unittest.TestCase):
+    def test_beats_are_merged_in_time_order_without_overlays(self):
+        shots = [
+            {"analysis": {"beats": [{"time": 7.25, "event": "A fist hits the glass."}]}},
+            {"analysis": {"beats": [
+                {"time": 2.0, "event": "People run."},
+                {"time": 3.0, "event": "White text appears."},
+                {"time": 4.0, "event": "  "},
+            ]}},
+        ]
+        self.assertEqual(
+            build_timeline(shots),
+            [{"time": 2.0, "event": "People run."}, {"time": 7.2, "event": "A fist hits the glass."}],
+        )
+
+    def test_writer_notes_filter_beats_too(self):
+        notes = writer_notes({"beats": [{"time": 1, "event": "A caption fades in."}], "subject": "a cat"})
+        self.assertEqual(notes, {"beats": [], "subject": "a cat"})
 
 
 class WriterInput(unittest.TestCase):

@@ -36,10 +36,11 @@ Options : `--port 8000` pour changer de port, `--no-browser` pour ne pas ouvrir 
 | `-t`, `--target` | Générateurs visés : `ltx`, `wan`, `generic` | `ltx,wan` |
 | `--variations` | Nombre de nouvelles idées dans le même style | `3` |
 | `-b`, `--backend` | `ollama` (local) ou `claude` (API) | `ollama` |
-| `-m`, `--model` | Modèle à utiliser | selon le backend |
+| `-m`, `--model` | Modèle qui analyse les images | selon le backend |
+| `--writer-model` | Modèle qui écrit les prompts, par exemple un plus petit et plus rapide | le même |
 | `-o`, `--output` | Dossier de sortie | `output` |
 | `--max-shots` | Plans analysés au maximum, les plus longs d'abord | `24` |
-| `--frames-per-shot` | Images analysées par plan | `4` |
+| `--frames-per-shot` | Images analysées par plan, choisies là où l'image change le plus | `8` |
 | `--scene-threshold` | Sensibilité aux coupes, de 0 à 1 (plus bas = plus de plans) | `0.3` |
 | `--no-transcribe` | Ignore la parole | désactivé |
 | `--whisper-model` | Modèle Whisper (`small`, `medium`, `large-v3`...) | `small` |
@@ -48,13 +49,15 @@ Options : `--port 8000` pour changer de port, `--no-browser` pour ne pas ouvrir 
 
 Chaque vidéo produit un dossier `output/<nom-de-la-video>/` :
 
-- `prompts.md` : le style global puis, pour chaque générateur, un prompt complet, un modèle réutilisable avec `[SUBJECT]`, `[SETTING]`, `[ACTION]`, un prompt négatif, des variations et un prompt par plan.
+- `prompts.md` : le style global, le déroulé horodaté puis, pour chaque générateur, un prompt complet, un modèle réutilisable avec des emplacements comme `[CHARACTER]`, `[SETTING]`, `[THREAT]`, un prompt négatif, des variations et un prompt par plan.
 - `result.json` : les mêmes données et l'analyse détaillée, pour les réutiliser dans un autre programme.
 - `frames/` : les images extraites. Celle indiquée pour chaque plan peut servir de départ en image-vers-vidéo.
 
 ## Utiliser Claude à la place d'Ollama
 
-Définis `ANTHROPIC_API_KEY`, puis ajoute `-b claude`. Le modèle par défaut est `claude-opus-5-5`. Cette option est payante à l'usage.
+Avec un abonnement Claude, connecte-toi à Claude Code puis ajoute `-b claude-code`, ou choisis « Abonnement » dans l'interface. Les analyses comptent dans les limites d'utilisation de ton abonnement.
+
+Avec l'API, définis `ANTHROPIC_API_KEY` puis ajoute `-b claude`. Cette option est payante à l'usage. Dans les deux cas, le modèle par défaut est `claude-opus-5-5`.
 
 ## À savoir
 

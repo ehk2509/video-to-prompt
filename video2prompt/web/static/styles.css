@@ -459,6 +459,9 @@ legend, .field label, .url-pane label { padding: 0; margin-bottom: 8px; font-wei
 .style-panel dt { font-size: 12px; font-weight: 650; }
 .style-panel dd { margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
 
+.timeline { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 18px; list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.timeline li { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+
 .block + .block { margin-top: 36px; }
 .block > h3 { margin-bottom: 12px; font-family: var(--display); font-size: 18px; font-weight: 640; letter-spacing: -.01em; }
 .card { padding: 18px; }

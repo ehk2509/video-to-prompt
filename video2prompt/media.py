@@ -133,26 +133,74 @@ def select_shots(shots: list[Shot], max_shots: int) -> list[Shot]:
     return sorted(longest, key=lambda s: s.start)
 
 
-def frame_times(shot: Shot, count: int) -> list[float]:
-    """Evenly spaced times, never on the shot edges where transitions sit."""
+def change_curve(path: Path, fps: int = 6) -> list[tuple[float, float]]:
+    """How much the picture changes over time, as (seconds, mean pixel difference)."""
+    width, height = 64, 36
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-i", str(path),
+         "-map", "0:v:0", "-vf", f"fps={fps},scale={width}:{height},format=gray",
+         "-f", "rawvideo", "-"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return []
+    size = width * height
+    data = result.stdout
+    frames = [data[i : i + size] for i in range(0, len(data) - size + 1, size)]
+    return [
+        (index / fps, sum(abs(a - b) for a, b in zip(before, after)) / size)
+        for index, (before, after) in enumerate(pairwise(frames), start=1)
+    ]
+
+
+def frame_times(
+    shot: Shot, count: int, curve: list[tuple[float, float]] | None = None
+) -> list[float]:
+    """Pick times inside the shot, closer together where the picture changes most.
+
+    Without a change curve the times are evenly spaced. Never on the exact shot edges,
+    where transitions sit.
+    """
     count = min(count, max(2, math.ceil(shot.duration * 2)))
-    return [shot.start + shot.duration * (i + 0.5) / count for i in range(count)]
+    points = [(t, c) for t, c in curve or [] if shot.start < t < shot.end]
+    if len(points) < count * 2:
+        return [shot.start + shot.duration * (i + 0.5) / count for i in range(count)]
+
+    changes = sorted(c for _, c in points)
+    # The floor keeps quiet moments covered; the cap stops one flash from taking every frame.
+    floor = max(sum(changes) / len(changes) * 0.25, 1e-3)
+    cap = max(changes[len(changes) // 2] * 4, floor)
+    weights = [min(c, cap) + floor for _, c in points]
+    total = sum(weights)
+
+    times: list[float] = []
+    running = 0.0
+    wanted = 0
+    for (time, _), weight in zip(points, weights):
+        running += weight
+        while wanted < count and running >= (wanted + 0.5) / count * total:
+            if not times or times[-1] != time:
+                times.append(time)
+            wanted += 1
+    return times
 
 
-def extract_frames(path: Path, shot: Shot, count: int, out_dir: Path, max_side: int) -> list[Path]:
+def extract_frames(
+    path: Path, shot: Shot, times: list[float], out_dir: Path, max_side: int
+) -> list[tuple[float, Path]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     scale = (
         f"scale='if(gt(iw,ih),min(iw,{max_side}),-2)':'if(gt(iw,ih),-2,min(ih,{max_side}))'"
     )
-    frames: list[Path] = []
-    for number, time in enumerate(frame_times(shot, count), start=1):
+    frames: list[tuple[float, Path]] = []
+    for number, time in enumerate(times, start=1):
         target = out_dir / f"shot_{shot.index:03d}_f{number}.jpg"
         result = _run(
             ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-ss", f"{time:.3f}", "-i", str(path),
              "-map", "0:v:0", "-frames:v", "1", "-vf", scale, "-q:v", "3", str(target)]
         )
         if result.returncode == 0 and target.exists():
-            frames.append(target)
+            frames.append((time, target))
     if not frames:
         raise MediaError(f"Aucune image extraite pour le plan {shot.index}.")
     return frames

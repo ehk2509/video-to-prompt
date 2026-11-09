@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -122,6 +126,114 @@ class ClaudeBackend:
         return json.loads(body)
 
 
+def _claude_code_env() -> dict[str, str]:
+    """Environment that makes the CLI use the signed-in subscription, even when run from Claude Code."""
+    removed = {"CLAUDECODE", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in removed and not key.startswith("CLAUDE_CODE_")
+    }
+
+
+def parse_claude_code_output(stdout: str) -> dict:
+    """Pull the structured answer out of the CLI's stream of JSON events."""
+    result = None
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            result = event
+    if result is None:
+        raise BackendError("Claude Code n'a renvoyé aucun résultat.")
+    if result.get("is_error") or result.get("subtype") != "success":
+        detail = result.get("result") or result.get("subtype") or "erreur inconnue"
+        raise BackendError(f"Claude Code a échoué : {detail}")
+    answer = result.get("structured_output")
+    if not isinstance(answer, dict):
+        raise BackendError("Claude Code n'a pas renvoyé de réponse structurée.")
+    return answer
+
+
+class ClaudeCodeBackend:
+    """Claude through the local Claude Code CLI, using the subscription it is signed in with."""
+
+    def __init__(self, model: str) -> None:
+        self.executable = shutil.which("claude")
+        if self.executable is None:
+            raise BackendError("Claude Code est introuvable dans le PATH.")
+        self.model = model
+
+    def generate(self, system: str, text: str, images: list[Path], schema: dict) -> dict:
+        content: list[dict] = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": base64.standard_b64encode(p.read_bytes()).decode("ascii"),
+                },
+            }
+            for p in images
+        ]
+        content.append({"type": "text", "text": text})
+        message = {"type": "user", "message": {"role": "user", "content": content}}
+        command = [
+            self.executable, "-p",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json", "--verbose",
+            "--model", self.model,
+            "--effort", "high" if images else "medium",
+            "--tools", "",
+            "--strict-mcp-config",
+            "--setting-sources", "",
+            "--no-session-persistence",
+            "--system-prompt", system,
+            "--json-schema", json.dumps(schema),
+        ]
+        try:
+            done = subprocess.run(
+                command,
+                input=json.dumps(message) + "\n",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=_claude_code_env(),
+                # Outside any project, so no project instructions reach the model.
+                cwd=tempfile.gettempdir(),
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise BackendError("Claude Code n'a pas répondu à temps.") from exc
+        try:
+            return parse_claude_code_output(done.stdout)
+        except BackendError as exc:
+            detail = done.stderr.strip()[-300:]
+            raise BackendError(f"{exc} {detail}".strip()) from exc
+
+
+def claude_code_signed_in() -> bool:
+    executable = shutil.which("claude")
+    if executable is None:
+        return False
+    try:
+        done = subprocess.run(
+            [executable, "auth", "status"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=_claude_code_env(),
+            timeout=20,
+        )
+        return bool(json.loads(done.stdout).get("loggedIn"))
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return False
+
+
 def ollama_vision_models(host: str = "http://127.0.0.1:11434") -> list[str] | None:
     """Installed models that accept images, or None when Ollama can't be reached."""
     try:
@@ -149,4 +261,6 @@ def create_backend(name: str, model: str | None) -> Backend:
         return OllamaBackend(model or "qwen3-vl:8b-instruct")
     if name == "claude":
         return ClaudeBackend(model or "claude-opus-5-5")
+    if name == "claude-code":
+        return ClaudeCodeBackend(model or "claude-opus-5-5")
     raise BackendError(f"Backend inconnu : {name}")

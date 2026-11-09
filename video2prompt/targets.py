@@ -18,6 +18,7 @@ class Target:
     negative_prompt: str
     # Added verbatim after the prompt, so a model can't paraphrase what is said. Empty = no audio.
     speech_line: str = ""
+    max_words: int = 200
 
 
 TARGETS: dict[str, Target] = {
@@ -37,6 +38,7 @@ TARGETS: dict[str, Target] = {
     ),
     "wan": Target(
         key="wan",
+        max_words=120,
         label="Wan 2.2 (image seule)",
         rules=(
             "Write one paragraph of about 80 to 120 words following this order: subject and "
@@ -46,11 +48,12 @@ TARGETS: dict[str, Target] = {
             "audio here: never mention sound, music or dialogue."
         ),
         negative_prompt=(
-            _COMMON_NEGATIVE + ", static frame, overexposed, oversaturated, cluttered background"
+            _COMMON_NEGATIVE + ", overexposed, oversaturated"
         ),
     ),
     "generic": Target(
         key="generic",
+        max_words=150,
         label="Générique (Sora, Veo, Kling, Runway...)",
         rules=(
             "Write one natural-language paragraph of 60 to 150 words in the present tense: "

@@ -22,12 +22,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import media
-from ..backends import BackendError, create_backend, ollama_vision_models
+from ..backends import BackendError, claude_code_signed_in, create_backend, ollama_vision_models
 from ..cli import download
 from ..pipeline import Options, run, slugify
 from ..targets import TARGETS
 
 DEFAULT_OLLAMA_MODEL = "qwen3-vl:8b-instruct"
+LARGE_OLLAMA_MODEL = "qwen3-vl:32b-instruct"
 STATIC_DIR = Path(__file__).parent / "static"
 OUTPUT_ROOT = Path.cwd() / "output" / "web"
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
@@ -46,6 +47,7 @@ class Job:
     root: Path
     backend: str
     model: str | None
+    writer_model: str | None
     options: Options
     url: str = ""
     upload: Path | None = None
@@ -109,6 +111,7 @@ def execute(job: Job) -> None:
             job.options,
             log=job.logs.append,
             on_progress=job.update,
+            writer=create_backend(job.backend, job.writer_model) if job.writer_model else None,
         )
         job.result = json.loads((job.output_dir / "result.json").read_text(encoding="utf-8"))
         job.status = "done"
@@ -144,9 +147,12 @@ def config() -> dict:
         "ollama": {
             "ok": models is not None,
             "models": models or [],
-            "default": DEFAULT_OLLAMA_MODEL,
+            # The large model reads frames best; the small one writes tighter prompts, far faster.
+            "default": LARGE_OLLAMA_MODEL if LARGE_OLLAMA_MODEL in (models or []) else DEFAULT_OLLAMA_MODEL,
+            "default_writer": DEFAULT_OLLAMA_MODEL,
         },
         "claude_available": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "claude_code_available": claude_code_signed_in(),
     }
 
 
@@ -157,9 +163,10 @@ def create_job(
     targets: Annotated[str, Form()] = "ltx,wan",
     backend: Annotated[str, Form()] = "ollama",
     model: Annotated[str, Form()] = "",
+    writer_model: Annotated[str, Form()] = "",
     variations: Annotated[int, Form(ge=0, le=10)] = 3,
     max_shots: Annotated[int, Form(ge=1, le=100)] = 24,
-    frames_per_shot: Annotated[int, Form(ge=2, le=8)] = 4,
+    frames_per_shot: Annotated[int, Form(ge=2, le=12)] = 8,
     scene_threshold: Annotated[float, Form(ge=0.05, le=0.9)] = 0.3,
     transcribe: Annotated[bool, Form()] = True,
     whisper_model: Annotated[str, Form(pattern=r"^[\w.-]+$")] = "small",
@@ -172,7 +179,7 @@ def create_job(
     chosen = tuple(t for t in targets.split(",") if t)
     if not chosen or any(t not in TARGETS for t in chosen):
         raise HTTPException(400, "Choisis au moins un générateur valide.")
-    if backend not in ("ollama", "claude"):
+    if backend not in ("ollama", "claude-code", "claude"):
         raise HTTPException(400, "Moteur inconnu.")
 
     job_id = secrets.token_hex(6)
@@ -193,6 +200,7 @@ def create_job(
         root=root,
         backend=backend,
         model=model or None,
+        writer_model=writer_model or None,
         url=url,
         upload=upload,
         options=Options(

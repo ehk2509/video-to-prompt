@@ -63,13 +63,20 @@
             <div class="segmented wide">
               <input class="sr-only" type="radio" name="backend" id="be-ollama" value="ollama" checked>
               <label for="be-ollama">Local</label>
+              <input class="sr-only" type="radio" name="backend" id="be-subscription" value="claude-code">
+              <label for="be-subscription" id="be-subscription-label">Abonnement</label>
               <input class="sr-only" type="radio" name="backend" id="be-claude" value="claude">
-              <label for="be-claude" id="be-claude-label">Claude</label>
+              <label for="be-claude" id="be-claude-label">API</label>
             </div>
-            <p class="hint" id="claude-hint" hidden>Claude est payant à l'usage. Définis ANTHROPIC_API_KEY pour l'activer.</p>
+            <p class="hint" id="subscription-hint" hidden>Utilise ton abonnement Claude via Claude Code, et compte dans ses limites d'utilisation.</p>
+            <p class="hint" id="claude-hint" hidden>L'API Claude est payante à l'usage. Définis ANTHROPIC_API_KEY pour l'activer.</p>
             <div class="field" id="model-field">
               <label for="model">Modèle de vision</label>
               <select id="model"></select>
+            </div>
+            <div class="field" id="writer-field">
+              <label for="writer-model">Modèle d'écriture</label>
+              <select id="writer-model"></select>
             </div>
           </fieldset>
 
@@ -92,7 +99,7 @@
             </div>
             <div class="field inline">
               <label for="frames">Images par plan</label>
-              <input type="number" id="frames" min="2" max="8" value="4">
+              <input type="number" id="frames" min="2" max="12" value="8">
             </div>
             <div class="field">
               <label for="threshold">Sensibilité aux coupes <output id="threshold-value">0.30</output></label>

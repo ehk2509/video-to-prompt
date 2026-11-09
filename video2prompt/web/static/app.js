@@ -24,6 +24,7 @@ const STAGES = {
 };
 
 const STYLE_FIELDS = [
+  ["premise", "Concept"],
   ["visual_style", "Style"],
   ["color_grade", "Étalonnage"],
   ["lighting", "Lumière"],
@@ -75,6 +76,10 @@ async function loadConfig() {
   select.replaceChildren(...ollama.models.map((name) => h("option", { value: name }, name)));
   if (ollama.models.includes(ollama.default)) select.value = ollama.default;
 
+  const writer = $("#writer-model");
+  writer.replaceChildren(...ollama.models.map((name) => h("option", { value: name }, name)));
+  if (ollama.models.includes(ollama.default_writer)) writer.value = ollama.default_writer;
+
   if (ollama.ok && ollama.models.length) {
     engine.textContent = "Ollama connecté";
     engine.className = "engine ok";
@@ -85,10 +90,14 @@ async function loadConfig() {
 
   const claudeRadio = $("#be-claude");
   claudeRadio.disabled = !claude;
+  $("#be-subscription").disabled = !state.config.claude_code_available;
   $("#claude-hint").hidden = claude;
   document.querySelectorAll('input[name="backend"]').forEach((radio) =>
     radio.addEventListener("change", () => {
-      $("#model-field").hidden = claudeRadio.checked;
+      const remote = !$("#be-ollama").checked;
+      $("#subscription-hint").hidden = !$("#be-subscription").checked;
+      $("#model-field").hidden = remote;
+      $("#writer-field").hidden = remote;
     })
   );
 }
@@ -141,7 +150,10 @@ async function submit(event) {
   else data.append("url", url);
   data.append("targets", targets.join(","));
   data.append("backend", backend);
-  if (backend === "ollama") data.append("model", $("#model").value);
+  if (backend === "ollama") {
+    data.append("model", $("#model").value);
+    data.append("writer_model", $("#writer-model").value);
+  }
   data.append("variations", $("#variations").value);
   data.append("max_shots", $("#max-shots").value);
   data.append("frames_per_shot", $("#frames").value);
@@ -325,6 +337,9 @@ function renderTarget(job, key) {
       ? block("Variations", master.variations.map((v) => promptCard(v.prompt, { title: v.concept })))
       : "",
     block("Prompt négatif", promptCard(negatives[key], { small: true })),
+    block("Déroulé", h("ol", { class: "timeline" }, job.result.timeline.map((beat) =>
+      h("li", {}, h("span", { class: "shot-time" }, `${beat.time.toFixed(1)} s`), h("span", {}, beat.event))
+    ))),
     block("Plan par plan", shots.map((shot) => shotCard(job, shot, key)))
   );
 }
@@ -334,7 +349,7 @@ function renderResult(job) {
   const { video, shots, style } = result;
   $("#result-name").textContent = job.name;
   $("#result-facts").textContent =
-    `${video.width}×${video.height} · ${video.duration.toFixed(1)} s · ${shots.length} plan(s) · ${result.model}`;
+    `${video.width}×${video.height} · ${video.duration.toFixed(1)} s · ${shots.length} plan(s) · analyse ${result.model} · écriture ${result.writer_model}`;
   $("#dl-md").href = `/api/jobs/${job.id}/download/prompts.md`;
   $("#dl-json").href = `/api/jobs/${job.id}/download/result.json`;
 
