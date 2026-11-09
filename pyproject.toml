@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video2prompt"
+version = "0.1.0"
+description = "Transforme une vidéo en prompts réutilisables pour les générateurs vidéo IA."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+claude = ["anthropic>=1.0"]
+transcribe = ["faster-whisper>=1.2"]
+download = ["yt-dlp"]
+all = ["anthropic>=1.0", "faster-whisper>=1.2", "yt-dlp"]
+
+[project.scripts]
+video2prompt = "video2prompt.cli:main"
+
+[tool.setuptools]
+packages = ["video2prompt"]
