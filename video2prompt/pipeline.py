@@ -247,6 +247,7 @@ def run(
     backend: Backend,
     options: Options,
     log: Callable[[str], None] = print,
+    on_progress: Callable[..., None] = lambda stage, done, total, preview=None: None,
 ) -> Path:
     unknown = [t for t in options.targets if t not in TARGETS]
     if unknown:
@@ -258,6 +259,7 @@ def run(
     info = media.probe(video)
     log(f"Vidéo : {info.width}x{info.height}, {info.duration:.1f} s, {info.fps:.2f} i/s")
 
+    on_progress("cuts", 0, 1)
     log("Détection des plans...")
     cuts = media.detect_cuts(video, options.scene_threshold)
     all_shots = media.build_shots(cuts, info.duration)
@@ -270,6 +272,7 @@ def run(
     segments: list[dict] = []
     transcription_error = ""
     if options.transcribe and info.has_audio:
+        on_progress("transcribe", 0, 1)
         log("Transcription de la parole...")
         try:
             segments = media.transcribe(video, options.whisper_model)
@@ -284,18 +287,20 @@ def run(
         frames = media.extract_frames(
             video, shot, options.frames_per_shot, frames_dir, options.max_side
         )
+        on_progress("analyse", position - 1, len(selected), frames[len(frames) // 2].name)
         speech = media.speech_for_shot(segments, shot)
         shots.append(
             {
                 **asdict(shot),
                 "duration": shot.duration,
-                "frames": [str(f.relative_to(output_dir)) for f in frames],
+                "frames": [f.relative_to(output_dir).as_posix() for f in frames],
                 "speech": speech,
                 "analysis": _analyse_shot(backend, shot, frames, speech),
                 "prompts": {},
             }
         )
 
+    on_progress("style", 0, 1)
     log("Synthèse du style global...")
     notes = [writer_notes(s["analysis"]) for s in shots]
     style = backend.generate(
@@ -308,12 +313,17 @@ def run(
     )
 
     masters: dict[str, dict] = {}
+    written, to_write = 0, (len(shots) + 1) * len(options.targets)
     for key in options.targets:
         target = TARGETS[key]
         log(f"Écriture des prompts {target.label}...")
         for shot in shots:
+            on_progress("write", written, to_write)
             shot["prompts"][key] = _write_shot_prompt(backend, target, style, shot)
+            written += 1
+        on_progress("write", written, to_write)
         masters[key] = _write_master(backend, target, style, shots, options.variations)
+        written += 1
 
     result = {
         "source": str(video),

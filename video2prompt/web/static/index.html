@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>video2prompt</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23c8f04b'/%3E%3Cpath d='M12 9l12 7-12 7z' fill='%23101114'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <button class="brand" id="home" type="button">
+      <span class="brand-mark" aria-hidden="true"></span>video2prompt
+    </button>
+    <span class="engine" id="engine" role="status">Connexion…</span>
+  </header>
+
+  <main>
+    <section id="view-setup">
+      <div class="intro">
+        <h1>De la vidéo au prompt.</h1>
+        <p>Dépose une vidéo : l'outil lit chaque plan et écrit les prompts pour en générer de similaires. Tout reste sur ta machine.</p>
+      </div>
+
+      <form id="form" class="setup" novalidate>
+        <div class="source">
+          <div class="segmented" role="tablist" aria-label="Source de la vidéo">
+            <button type="button" role="tab" id="tab-file" aria-selected="true">Fichier</button>
+            <button type="button" role="tab" id="tab-url" aria-selected="false">Lien</button>
+          </div>
+
+          <label class="drop" id="drop">
+            <input type="file" id="file" accept="video/*,.mkv,.mov,.webm,.avi" class="sr-only">
+            <span class="drop-empty" id="drop-empty">
+              <span class="drop-icon" aria-hidden="true"></span>
+              <strong>Dépose ta vidéo ici</strong>
+              <span>ou clique pour la choisir</span>
+            </span>
+            <span class="drop-filled" id="drop-filled" hidden>
+              <video id="video-preview" muted playsinline controls></video>
+              <span class="file-line">
+                <span id="file-name"></span>
+                <button type="button" class="link" id="file-clear">Changer</button>
+              </span>
+            </span>
+          </label>
+
+          <div class="url-pane" id="url-pane" hidden>
+            <label for="url">Lien de la vidéo</label>
+            <input type="url" id="url" placeholder="https://…" autocomplete="off">
+            <p class="hint">YouTube, TikTok, Instagram, lien direct vers un fichier… Vérifie que tu as le droit de réutiliser la vidéo.</p>
+          </div>
+        </div>
+
+        <div class="settings">
+          <fieldset>
+            <legend>Générateurs</legend>
+            <div class="chips" id="targets"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Moteur d'analyse</legend>
+            <div class="segmented wide">
+              <input class="sr-only" type="radio" name="backend" id="be-ollama" value="ollama" checked>
+              <label for="be-ollama">Local</label>
+              <input class="sr-only" type="radio" name="backend" id="be-claude" value="claude">
+              <label for="be-claude" id="be-claude-label">Claude</label>
+            </div>
+            <p class="hint" id="claude-hint" hidden>Claude est payant à l'usage. Définis ANTHROPIC_API_KEY pour l'activer.</p>
+            <div class="field" id="model-field">
+              <label for="model">Modèle de vision</label>
+              <select id="model"></select>
+            </div>
+          </fieldset>
+
+          <div class="field inline">
+            <label for="variations">Variations à inventer</label>
+            <input type="number" id="variations" min="0" max="10" value="3">
+          </div>
+
+          <label class="switch">
+            <input type="checkbox" id="transcribe" class="sr-only" checked>
+            <span class="track" aria-hidden="true"></span>
+            Transcrire la parole
+          </label>
+
+          <details class="advanced">
+            <summary>Réglages avancés</summary>
+            <div class="field inline">
+              <label for="max-shots">Plans analysés au maximum</label>
+              <input type="number" id="max-shots" min="1" max="100" value="24">
+            </div>
+            <div class="field inline">
+              <label for="frames">Images par plan</label>
+              <input type="number" id="frames" min="2" max="8" value="4">
+            </div>
+            <div class="field">
+              <label for="threshold">Sensibilité aux coupes <output id="threshold-value">0.30</output></label>
+              <input type="range" id="threshold" min="0.05" max="0.9" step="0.05" value="0.3">
+              <p class="hint">Plus la valeur est basse, plus l'outil trouve de plans.</p>
+            </div>
+            <div class="field">
+              <label for="whisper">Modèle Whisper</label>
+              <select id="whisper">
+                <option value="small" selected>small (déjà installé)</option>
+                <option value="medium">medium (téléchargement)</option>
+                <option value="large-v3">large-v3 (téléchargement)</option>
+              </select>
+            </div>
+          </details>
+
+          <p class="error" id="form-error" role="alert" hidden></p>
+          <button class="primary" id="submit" type="submit">Générer les prompts</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="view-progress" hidden>
+      <div class="progress-grid">
+        <div class="preview" id="preview-wrap"><img id="preview" alt="Image du plan en cours d'analyse" hidden></div>
+        <div>
+          <p class="eyebrow" id="progress-name"></p>
+          <h2 id="progress-title">En file d'attente…</h2>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bar"><span id="bar-fill"></span></div>
+          <p class="count" id="progress-count"></p>
+          <ol class="stages" id="stages"></ol>
+          <p class="error" id="progress-error" role="alert" hidden></p>
+          <div class="row">
+            <button class="ghost" id="cancel" type="button">Annuler</button>
+            <button class="ghost" id="retry" type="button" hidden>Recommencer</button>
+          </div>
+          <details class="log"><summary>Journal</summary><pre id="log"></pre></details>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-result" hidden>
+      <div class="result-head">
+        <div>
+          <p class="eyebrow" id="result-facts"></p>
+          <h2 id="result-name"></h2>
+        </div>
+        <div class="row">
+          <a class="ghost" id="dl-md" download>prompts.md</a>
+          <a class="ghost" id="dl-json" download>result.json</a>
+          <button class="primary small" id="again" type="button">Nouvelle vidéo</button>
+        </div>
+      </div>
+      <div class="notice" id="result-notice" hidden></div>
+      <div class="tabs" id="result-tabs" role="tablist" aria-label="Générateur"></div>
+      <div class="result-grid">
+        <div id="result-main"></div>
+        <aside class="style-panel" id="style-panel"></aside>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

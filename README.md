@@ -14,7 +14,17 @@ python -m venv .venv
 ollama pull qwen3-vl:8b-instruct
 ```
 
-## Utilisation
+## Interface web
+
+```powershell
+.\.venv\Scripts\video2prompt-web.exe
+```
+
+La page s'ouvre sur <http://127.0.0.1:7860>. Dépose une vidéo ou colle un lien, suis l'analyse plan par plan, puis copie chaque prompt en un clic. L'interface reste accessible uniquement depuis ta machine. Les résultats sont enregistrés dans `output/web/`.
+
+Options : `--port 8000` pour changer de port, `--no-browser` pour ne pas ouvrir le navigateur.
+
+## Ligne de commande
 
 ```powershell
 .\.venv\Scripts\video2prompt.exe ma_video.mp4

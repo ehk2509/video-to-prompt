@@ -122,6 +122,26 @@ class ClaudeBackend:
         return json.loads(body)
 
 
+def ollama_vision_models(host: str = "http://127.0.0.1:11434") -> list[str] | None:
+    """Installed models that accept images, or None when Ollama can't be reached."""
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=3) as response:
+            names = [m["name"] for m in json.load(response).get("models", [])]
+        vision = []
+        for name in names:
+            request = urllib.request.Request(
+                f"{host}/api/show",
+                data=json.dumps({"model": name}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                if "vision" in json.load(response).get("capabilities", []):
+                    vision.append(name)
+        return vision
+    except (urllib.error.URLError, TimeoutError):
+        return None
+
+
 def create_backend(name: str, model: str | None) -> Backend:
     if name == "ollama":
         # The instruct variant has no thinking mode: the plain tag ignores think=false
